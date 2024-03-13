@@ -1,0 +1,359 @@
+---
+title: "STAT 36900: Homework 2"
+author: "Robert Winter"
+format: pdf
+editor: visual
+
+highlight-style: pygments
+geometry:
+      - top=30mm
+      - left=30mm
+toc: true
+toc-title: Table of Contents
+number-sections: true
+
+echo: false
+warning: false
+
+# Wrap code chunk text
+include-in-header:
+  text: |
+    \usepackage{fvextra}
+    \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+---
+
+# Introduction
+
+**The data for this problem are from the Riesby *et al.* article that we have discussed in class. This study examined the relationship in depressed inpatients between the drug plasma levels—the antidepressant imipramine (IMI) and its metabolite desimipramine (DMI)—and clinical response as measured by the Hamilton Depression Rating Scale (HDRS). In class, we noted that there was a significant relationship across time between the drug plasma levels (specifically, desimipramine) and depression. The dataset (`RIESBYT4.DAT.txt`) contains the following variables:**
+
+-   **field 1: Patient ID**
+
+-   **field 2: HDRS change from baseline score**
+
+-   **field 3: a field of ones (is "one" the loneliest variable?) — *ignore this variable***
+
+-   **field 4: week — from 0 (Week 2) to 3 (Week 5)**
+
+-   **field 5: sex (0 = male, 1 = female) — *ignore this variable***
+
+-   **field 6: diagnostic group (0 = non-endogenous, 1 = endogenous) — *ignore this variable***
+
+-   **field 7: imipramine (IMI) plasma levels (in** $\ln$ **units)**
+
+-   **field 8: desimipramine (DMI) plasma levels (in** $\ln$ **units)**
+
+**For this problem, I would like you to combine the drug plasma levels into one variable — the natural log (**$\ln$**) of the ratio of DMI to IMI (*i.e.,*** $\ln(DMI) - \ln(IMI)$**, [note that these variables are already on the]{.underline}** $\ln$ [**scale in the dataset**]{.underline}**). Let's denote this variable as LDIM. From a substantive point of view, the ratio of the metabolite to the administered drug might be thought of as a measure of the degree of drug metabolism. For this problem set do the following.**
+
+```{r}
+#| output: false
+
+library(RStata)
+# chooseStataBin()
+options("RStata.StataPath" = "\"C:\\Program Files\\Stata18\\StataBE-64\""
+)
+options("RStata.StataVersion" = 18)
+```
+
+```{r}
+#| output: false
+
+library(tidyverse)
+library(ggplot2)
+library(stringr)
+```
+
+```{r}
+riesbyt4 = read.csv("C:/Users/rewin/OneDrive/Documents/STAT_36900/HW2/RIESBYT4.csv") %>%
+  mutate(ldim = lndmi - lnimi)
+```
+
+# Question 1
+
+**Plot the HDRS (change from baseline) means across time, and then fit a reasonable random-effects model to account for any apparent trends across time. Write down the level-1 and level-2 models. Interpret the parameter estimates from your model.**
+
+Below, we present the mean changes in HDRS scores from baseline across patients at Weeks 2 through 5 of the study, marked with a $\times$ symbol. (To further illustrate the distributions of HDRS changes from baseline, we also embed a box plot in the background of the figure.) Observe that, on average, the gap between current and baseline HDRS scores increases by an (approximately) fixed amount each week. This suggests that changes in HDRS scores from baseline should be modeled using a linear time trend.
+
+```{r}
+ggplot(data = riesbyt4,
+       aes(group = week, x = week, y = deltaHDRS)) +
+  theme_bw() +
+  geom_boxplot(coef = 1.5, color = "gray") +
+  stat_summary(fun.y = mean, geom = "point", size = 4, shape = 4) +
+  ylab("HDRS Change from Baseline") +
+  xlab("Week") +
+  scale_x_continuous(breaks = c(0:3),
+                     labels = c("Week 2", "Week 3",
+                                "Week 4", "Week 5")) +
+  labs(title = str_wrap("Mean HDRS Change from Baseline Over Time", 49)) +
+  theme(plot.title = element_text(hjust = 0.5),
+        panel.grid.minor.x = element_blank())
+```
+
+So, we move forward with the following mixed model to the data:
+
+[Within-Subjects Model:]{.underline}
+
+$$
+\Delta HDRS_{ij} = b_{0i} + b_{1i} \cdot Week_{ij} + \varepsilon_{ij}
+$$
+
+where:
+
+-   $i = 1, \ldots, 66$ individuals, and
+
+-   $j = 1, \ldots, n_i$ observations ($3 \le n_i \le 4$) for patient $i$,
+
+and
+
+-   $b_{0i}$ is patient $i$'s change in HDRS score from her baseline score as of Week 2, and
+
+-   $b_{1i}$ is patient $i$'s average weekly linear incremental (i.e., from the previous week) change in HDRS score.
+
+[Between-Subjects Model:]{.underline}
+
+$$
+\begin{aligned}
+b_{0i} &= \beta_0 + \upsilon_{0i} \\
+b_{1i} &= \beta_1 + \upsilon_{1i}
+\end{aligned}
+$$
+
+where:
+
+-   $\beta_0$ is the average change in HDRS score from baseline as of Week 2 across all patients,
+
+-   $\upsilon_{0i}$ is patient $i$'s deviation from the average change in HDRS score from baseline as of Week 2,
+
+-   $\beta_1$ is the average weekly linear incremental change in HDRS score across all patients, and
+
+-   $\upsilon_{1i}$ is patient $i$'s deviation from the average weekly linear incremental change in HDRS score.
+
+```{r}
+stata(
+'infile id deltaHDRS one week sex dx lnimi lndmi ///
+using RIESBYT4.DAT.txt, clear
+generate ldim = lndmi - lnimi
+
+* Random intercept and random linear time trend
+mixed deltaHDRS week || id: week, covariance(unstructured) mle
+')
+```
+
+As shown above, we recover a statistically significant ($p < 0.001$) estimate of $\beta_0$ equal to approximately $-4.953$, which means that, on average, patients' HDRS scores improved by 4.953 points relative to baseline as of Week 2 of the study. We also recover a statistically significant ($p < 0.001$) estimate of $\beta_1$ equal to $-2.116$, which means that, on average, patients' HDRS scores improved by an additional 2.116 points each subsequent week of the study.
+
+# Question 2
+
+**Add the drug plasma variable LDIM to your model and comment on its relationship with the HDRS change scores across time. Support your interpretation with descriptive statistics, as needed. Write down the level-1 and level-2 models.**
+
+We now consider the following mixed model, which includes the time-varying covariate $LDIM_{ij}$:
+
+[Within-Subjects Model:]{.underline}
+
+$$
+\Delta HDRS_{ij} = b_{0i} + b_{1i} \cdot Week_{ij} + b_{2i} \cdot LDIM_{ij} + \varepsilon_{ij}
+$$
+
+where:
+
+-   $i = 1, \ldots, 66$ individuals, and
+
+-   $j = 1, \ldots, n_i$ observations ($3 \le n_i \le 4$) for patient $i$,
+
+and:
+
+-   $b_{0i}$ is patient $i$'s change in HDRS score from her baseline score as of Week 2,
+
+-   $b_{1i}$ is patient $i$'s average weekly linear incremental (i.e., from the previous week) change in HDRS score, and
+
+-   $b_{2i}$ is the incremental change in patient $i$'s HDRS score associated with a one-unit increase in the log of the ratio of her DMI to IMI plasma levels.
+
+[Between-Subjects Model:]{.underline}
+
+$$
+\begin{aligned}
+b_{0i} &= \beta_0 + \upsilon_{0i} \\
+b_{1i} &= \beta_1 + \upsilon_{1i} \\
+b_{2i} &= \beta_2
+\end{aligned}
+$$
+
+where:
+
+-   $\beta_0$ is the average change in HDRS score from baseline as of Week 2 across all patients,
+
+-   $\upsilon_{0i}$ is patient $i$'s deviation from the average change in HDRS score from baseline as of Week 2,
+
+-   $\beta_1$ is the average weekly linear incremental change in HDRS score across all patients,
+
+-   $\upsilon_{1i}$ is patient $i$'s deviation from the average weekly linear incremental change in HDRS score, and
+
+-   $\beta_2$ is the average incremental change in HDRS score associated with a one-unit increase in the log of the ratio of a patient's DMI to IMI plasma levels across all patients.
+
+```{r}
+stata(
+'infile id deltaHDRS one week sex dx lnimi lndmi ///
+using RIESBYT4.DAT.txt, clear
+generate ldim = lndmi - lnimi
+
+* Random intercept and random linear time trend
+* Assume WS = BS effects
+mixed deltaHDRS week ldim || id: week, covariance(unstructured) mle
+')
+```
+
+As shown above, we continue to recover a statistically significant ($p < 0.001$) estimate of $\beta_0$, though now with a value of $-4.039$, which means that, on average, patients' HDRS scores improved by 4.039 points relative to baseline as of Week 2 of the study. We also continue to recover a statistically significant ($p < 0.001$) estimate of $\beta_1$, though now with a value of $-2.029$, which means that, on average, patients' HDRS scores improved by an additional 2.029 points each subsequent week of the study.
+
+Moreover, in this model, we also recover a statistically significant ($p = 0.005$) estimate of $\beta_2$ equal to $-1.550$. Intuitively, this means that a one-unit increase in a patient's drug metabolism (as measured by LDIM, the log of the ratio of her DMI to IMI plasma levels) is associated with a 1.550-point decrease in her HDRS score, while a one-unit decrease in her drug metabolism is associated with a 1.550-point increase in her HDRS score. From a medical perspective, this is compelling evidence that improving a patient's drug metabolism can augment and expedite her response to medication.
+
+As noted in class, this dataset contains one noteworthy outlier: patient 106 allegedly had a $\ln(DMI)$ value of precisely 0 during Week 2 of the study, which may very well be a data entry error. Fortunately, as shown below, our results are robust to dropping this observation. Indeed, without this data point, we estimate $\beta_0$ to be $-3.934$ ($p < 0.001$), $\beta_1$ to be $-2.032$ ($p < 0.001$), and $\beta_2$ to be $-1.686$ ($p = 0.006$).
+
+```{r}
+stata(
+'infile id deltaHDRS one week sex dx lnimi lndmi ///
+using RIESBYT4.DAT.txt, clear
+generate ldim = lndmi - lnimi
+
+* Random intercept and random linear time trend
+* Assume WS = BS effects
+* Drop outlier point
+mixed deltaHDRS week ldim if lndmi > 0 || id: week, covariance(unstructured) mle
+')
+```
+
+The negative association between LDIM and HDRS change scores can also be gleaned from simple descriptive statistics. For example, in the scatterplot of HDRS change scores against LDIM below, one can observe a general negative trend in the data. Quantitatively, the Pearson correlation coefficient between LDIM and HDRS change scores is $-0.2281$, with a $p$-value of 0.0003. Even dropping the outlier point in the upper-left corner of the scatterplot (which may have an outsized influence on the calculation), the Pearson correlation coefficient is still $-0.2115$, with a $p$-value of 0.0008. This is further evidence that there is a negative—if small—relationship between LDIM and HDRS change scores.
+
+```{r}
+ggplot(data = riesbyt4, aes(x = ldim, y = deltaHDRS)) +
+  theme_bw() +
+  geom_point() +
+  xlab("LDIM") +
+  ylab("HDRS Change from Baseline") +
+  ggtitle("HDRS Change Scores vs. LDIM") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r}
+stata(
+'* Pearson correlation coefficient
+infile id deltaHDRS one week sex dx lnimi lndmi ///
+using RIESBYT4.DAT.txt, clear
+generate ldim = lndmi - lnimi
+
+pwcorr ldim deltaHDRS, sig star(0.05)
+
+* Robustness removing outlier
+infile id deltaHDRS one week sex dx lnimi lndmi ///
+using RIESBYT4.DAT.txt, clear
+generate ldim = lndmi - lnimi
+keep if ldim > -4
+
+pwcorr ldim deltaHDRS, sig star(0.05)
+')
+```
+
+# Question 3
+
+**Partition the effect of the time-varying variable LDIM into its within-subjects and between-subjects effects. Write down the level-1 and level-2 models and interpret your results. Test whether the within-subjects and between-subjects effects of LDIM can be considered equal.**
+
+Decomposing the effect of $LDIM_{ij}$ into its within-subjects and between-subjects effects, we consider the following mixed model:
+
+[Within-Subjects Model:]{.underline}
+
+$$
+\Delta HDRS_{ij} = b_{0i} + b_{1i} \cdot Week_{ij} + b_{2i} \cdot (LDIM_{ij} - \overline{LDIM}_i) + \varepsilon_{ij}
+$$
+
+where:
+
+-   $i = 1, \ldots, 66$ individuals, and
+
+-   $j = 1, \ldots, n_i$ observations ($3 \le n_i \le 4$) for patient $i$,
+
+and:
+
+-   $b_{0i}$ is patient $i$'s change in HDRS score from her baseline score as of Week 2,
+
+-   $b_{1i}$ is patient $i$'s average weekly linear incremental (i.e., from the previous week) change in HDRS score, and
+
+-   $b_{2i}$ is patient $i$'s average change in HDRS score associated with a deviation of her LDIM level from her average LDIM level.
+
+[Between-Subjects Model:]{.underline}
+
+$$
+\begin{aligned}
+b_{0i} &= \beta_0 + \beta_{BS} \cdot \overline{LDIM}_i + \upsilon_{0i} \\
+b_{1i} &= \beta_1 + \upsilon_{1i} \\
+b_{2i} &= \beta_{WS}
+\end{aligned}
+$$
+
+where:
+
+-   $\beta_0$ is the average change in HDRS score from baseline as of Week 2 across all patients, assuming that those patients' average DMI and IMI plasma levels are equal (so that $\overline{LDIM}_i=0 \;\; \forall i$),
+
+-   $\beta_{BS}$ is the average incremental HDRS score change attributable to a one-unit increase in a patient's average LDIM level, across all patients,
+
+-   $\upsilon_{0i}$ is patient $i$'s deviation from the average change in HDRS score from baseline as of Week 2,
+
+-   $\beta_1$ is the average weekly linear incremental change in HDRS score across all patients,
+
+-   $\upsilon_{1i}$ is patient $i$'s deviation from the average weekly linear incremental change in HDRS score, and
+
+-   $\beta_{WS}$ is the average incremental change in a patient's HDRS score associated with a deviation from her average LDIM level, across all patients.
+
+```{r}
+stata(
+'infile id deltaHDRS one week sex dx lnimi lndmi ///
+using RIESBYT4.DAT.txt, clear
+generate ldim = lndmi - lnimi
+egen ldim_mean = mean(ldim), by(id)
+gen ldim_dev = ldim - ldim_mean
+
+* Assuming BS != WS effects
+mixed deltaHDRS week ldim_mean ldim_dev ///
+      || id: week, covariance(unstructured) mle
+')
+```
+
+As shown above, we continue to recover a statistically significant ($p < 0.001$) estimate of $\beta_0$, though now with a value of $-4.234$, which means that, on average, patients' HDRS scores improved by 4.234 points relative to baseline as of Week 2 of the study. We also continue to recover a statistically significant ($p < 0.001$) estimate of $\beta_1$, though now with a value of $-2.004$, which means that, on average, patients' HDRS scores improved by an additional 2.004 points each subsequent week of the study.
+
+We also recover an estimated between-subjects effect of LDIM of $-1.307$, though it is not statistically significant ($p = 0.061$). This means that there is not statistical evidence that changes in an individual's average LDIM level affect her HDRS change scores. However, we recover an estimated within-subjects effect of LDIM of $-1.973$, which is statistically significant ($p = 0.035$). This means that a one-unit increase in LDIM from a patient's average improves (i.e., increases the magnitude in the negative direction) her HDRS change score by nearly two points.
+
+It is also important to investigate whether the within-subjects and between-subjects effects of LDIM are different from each other. The model we considered in Question 2—which tacitly assumed that the within-subjects and between-subjects components of the effect of LDIM on HDRS change scores are equal—has a log likelihood of $-750.49056$. Meanwhile, the model currently under consideration, which allows for unequal within- and between-subjects effects of LDIM, has a log likelihood of $-750.34569$. Thus, the likelihood ratio $\chi^2$ statistic for comparing these two models is $LR \;\; \chi^2 \approx -2\times \big(-750.49056 - (-750.34569)\big) \approx 0.28974$. Since we are testing the null hypothesis $H_0: \beta_{BS} = \beta_{WS}$ against the alternative hypothesis $H_1: \beta_{BS} \ne \beta_{WS}$, we are contemplating the addition of one parameter to our model; as such, we test the significance of our statistic using a $\chi^2_1$ distribution (i.e., the $\chi^2$ distribution with 1 degree of freedom):
+
+```{r}
+stata(
+'display(chi2tail(1, 0.28974))
+')
+```
+
+Since $p \approx 0.590 > 0.05$, there is not statistical evidence that $\beta_{BS}$ is significantly different than $\beta_{WS}$. That is, we can consider the within-subjects and between-subjects effects of LDIM on HDRS change scores to be equal.
+
+Once again (and as shown in the Stata output below), our model is generally robust to the omission of our outlier point with $\ln(DMI) = 0$. In this case, we estimate $\beta_0$ to equal $-4.162$ ($p < 0.001$), $\beta_1$ to equal $-1.998$ ($p < 0.001$), $\beta_{BS} = -1.405$ ($p = 0.048$), and $\beta_{WS}$ of $-2.365$ ($p = 0.029$). Notably, dropping the outlier observation has made our estimate of the between-subjects effect of LDIM statistically significant at the $\alpha = 0.05$ level. Moreover, comparing the log-likelihoods of the two models omitting the outlier point yields a $\chi^2$ statistic of $-2 \times \big(-748.0354 - (-747.76624) \big) = 0.26916$. Testing against the $\chi^2$ distribution with one degree of freedom yields a $p$-value of $p \approx 0.604 > 0.05$, meaning that even removing the outlier, there is not statistical evidence that $\beta_{BS}$ is significantly different than $\beta_{WS}$.
+
+```{r}
+stata(
+'infile id deltaHDRS one week sex dx lnimi lndmi ///
+using RIESBYT4.DAT.txt, clear
+generate ldim = lndmi - lnimi
+egen ldim_mean = mean(ldim), by(id)
+gen ldim_dev = ldim - ldim_mean
+
+* Assuming BS != WS effects
+* Drop outlier point
+mixed deltaHDRS week ldim_mean ldim_dev if lndmi > 0 ///
+      || id: week, covariance(unstructured) mle
+')
+```
+
+```{r}
+stata(
+'display(chi2tail(1, 0.26916))
+')
+```
+
+# Question 4
+
+**Summarize your findings. What do you conclude about the relationship between HDRS change and LDIM?**
+
+We have shown—using both mixed models and simple computations of Pearson's correlation coefficient—that there is a statistically significant, negative relationship between LDIM and HDRS change scores. That is, an increase in a patient's drug metabolism as measured by LDIM is associated with a more negative change in HDRS from baseline—that is, with greater improvement in depression score. However, we did not find that there was a statistically significant difference between the within-subjects and between-subjects effects of LDIM on HDRS change scores. In other words, the effect of an individual's deviation from her mean LDIM level on her HDRS change score is no (statistically) different than the effect of a change in her mean LDIM level.

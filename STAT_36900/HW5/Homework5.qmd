@@ -1,0 +1,361 @@
+---
+title: "STAT 36900: Homework 5"
+author: "Robert Winter"
+format: pdf
+editor: visual
+
+highlight-style: pygments
+geometry:
+      - top=30mm
+      - left=30mm
+toc: true
+toc-title: Table of Contents
+number-sections: true
+
+echo: false
+warning: false
+
+# Wrap code chunk text
+include-in-header:
+  text: |
+    \usepackage{fvextra}
+    \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+---
+
+# Introduction
+
+**The data for this problem are from the Riesby *et al.*** **article that we have discussed in class. This study examined the relationship in depressed inpatients between the drug plasma levels—the antidepressant imipramine (IMI) and its metabolite desimipramine (DMI)—and clinical response as measured by the Hamilton Depression Rating Scale (HDRS). In class, I might have mentioned that the study investigators treated HDRS as a trichotomous outcome:**
+
+**`if hdrs lt 8 then hdrs3 = 0`**
+
+**`if hdrs ge 8 and hdrs le 15 then hdrs3 = 1`**
+
+**`if hdrs gt 15 then hdrs3 = 2`**
+
+**Thus, `0` can be thought of as "normal," `1` as "mild depression," and `2` as "definite depression." The dataset (`RIESORD3.RRM.txt`), which is available on the class Canvas website, contains the following variables:**
+
+-   **field 1: Patient ID — `id`**
+
+-   **field 2: continuous HDRS score — *ignore this variable***
+
+-   **field 3: dichotomized HDRS score — *ignore this variable***
+
+-   **filed 4: trichotomized HDRS score — `hdrs3`**
+
+-   **field 5: a field of ones — *ignore this variable***
+
+-   **field 6: Week, from 0 (Week 2) to 3 (Week 5) — `week`**
+
+-   **field 7: dichotomized (median split) Desimipramine (DMI) plasma levels — `dmi2`**
+
+-   **field 8: dichotomized Desimipramine (DMI) plasma levels** $\times$ **Week**
+
+-   **field 9: centered Desimipramine (DMI) plasma levels — *ignore this variable***
+
+-   **field 10: centered Desimipramine (DMI) plasma levels** $\times$ **Week — *ignore this variable***
+
+[**Note that `-9` indicates a missing observation for all variables (in particular, for `hdrs3` and `dmi2`); these should be removed in your analyses of these data.**]{.underline}
+
+```{r}
+#| output: false
+
+library(RStata)
+# chooseStataBin()
+options("RStata.StataPath" = "\"C:\\Program Files\\Stata18\\StataBE-64\""
+)
+options("RStata.StataVersion" = 18)
+```
+
+```{r}
+#| output: false
+
+library(tidyverse)
+library(ggplot2)
+library(reshape2)
+```
+
+```{r}
+#| output: false
+
+riesord3 = read.csv("C:/Users/rewin/OneDrive/Documents/STAT_36900/HW5/riesord3.csv") %>%
+  mutate(hdrsc = case_match(hdrsc, -9 ~ NA, .default = hdrsc),
+         hdrs2 = case_match(hdrs2, -9 ~ NA, .default = hdrs2),
+         hdrs3 = case_match(hdrs3, -9 ~ NA, .default = hdrs3),
+         dmi2 = case_match(dmi2, -9 ~ NA, .default = dmi2),
+         dmi2_week = case_match(dmi2_week, -9 ~ NA, .default = dmi2_week),
+         dmic = case_match(dmic, -9 ~ NA, .default = dmic),
+         dmic_week = case_match(dmic_week, -9 ~ NA, .default = dmic_week))
+```
+
+# Question 1
+
+**Using `hdrs3` as the outcome, estimate a random-intercepts ordinal logistic regression model with the predictors of `week` and `dmi2`. Interpret the effects of these two independent variables. Provide an estimate of the intraclass correlation.**
+
+Below, we estimate the following random-intercepts ordinal logistic regression model:
+
+[Within-Subjects Model:]{.underline}
+
+$$
+\lambda_{ijc} = \gamma_c - \bigl[ b_{0i} + b_{1i} \cdot Week_{ij} + b_{2i} \cdot DMI2_{ij} \bigr]
+$$
+
+where:
+
+-   $i = 1, \ldots, 250$ individuals,
+
+-   $j = 1, \ldots, n_i$ observations for each patient $i$ (with $n_i \in \{3, 4\} \;\forall i$),
+
+-   $c = 1, 2$, corresponding to the cutoffs (1) between "normal" mental health and "mild" or "definite" depression, and (2) between "normal" mental health or "mild" depression and "definite" depression, and
+
+-   $\lambda_{ijc} = \log \biggl( \frac{\mathbb{P}(HDRS3_{ij} \le c)} {1 - \mathbb{P}(HDRS3_{ij} \le c)} \biggr)$,
+
+and:
+
+-   $\gamma_c$ is the log odds of experiencing depression of level $(c-1)$ or below, relative to levels $c$ and above, as of Week 2 and assuming DMI levels are below median. In particular, $\gamma_1$ is the log odds of experiencing "normal" mental health relative to experiencing depression, while $\gamma_2$ is the log odds of experiencing non-"definite" depression relative to "definite" depression, in each case as of Week 2 and assuming DMI levels are below median,
+
+-   $b_{0i}$ is patient $i$'s log odds of having depression at a level less than $c$ as of Week 2, assuming their DMI levels are below median, for $c \in \{1, 2\}$,
+
+-   $b_{1i}$ is patient $i$'s weekly linear change in the log odds of having depression at a level less than $c$, for $c \in \{1, 2\}$, and
+
+-   $b_{2i}$ is the difference between patient $i$'s log odds of having depression at a level less than $c$ if their DMI levels were above median compared to if their DMI levels were below median, for $c \in \{1, 2\}$.
+
+[Between-Subjects Model:]{.underline}
+
+$$
+\begin{aligned}
+b_{0i} &= \upsilon_{0i} \\
+b_{1i} &= \beta_1 \\
+b_{2i} &= \beta_2 \\
+\upsilon_{0i} &\sim \mathrm{i.i.d.} \; \mathcal{N}(0,\sigma^2_\upsilon)
+\end{aligned}
+$$
+
+where:
+
+-   $\upsilon_{0i}$ is patient $i$'s deviation from the "typical patient's" log odds of having depression at a level less than $c$ as of Week 2, assuming their DMI levels are below median, for $c \in \{1,2\}$,
+
+-   $\beta_1$ is the weekly linear change in a given patient's log odds of having depression at a level less than $c$, for a given value of $\upsilon_{0i}$, for $c \in \{1, 2\}$, and
+
+-   $\beta_2$ is the difference between a given patient's log odds of having depression at a level less than $c$ if their DMI levels were above the median compared to if their DMI levels were below the median, for a given value of $\upsilon_{0i}$, for $c \in \{1, 2\}$.
+
+```{r}
+stata(
+'infile id hdrsc hdrs2 hdrs3 one week dmi2 dmi2_week dmic dmic_week ///
+using RIESORD3.RRM.txt, clear
+
+quietly recode hdrsc hdrs2 hdrs3 dmi2 dmi2_week dmic dmic_week (-9 = .)
+
+meologit hdrs3 week dmi2 || id:
+')
+```
+
+As summarized in the Stata output above, we find that:
+
+-   The log odds of experiencing "normal" mental health relative to experiencing depression as of Week 2 for below-median DMI levels is approximately $-6.067$.
+
+-   The log odds of experiencing "normal" mental health or "mild" depression relative to experiencing "definite" depression as of Week 2 and for below-median DMI levels is approximately $-2.201$.
+
+-   Each week, a given patient's (i.e., holding $\upsilon_{0i}$ fixed) log odds of having depression at a level less than $c$ increase by approximately $1.158$, for $c \in \{1,2\}$.
+
+-   A given patient's (i.e., holding $\upsilon_{0i}$ fixed) log odds of having depression at a level less than $c$ are approximately $1.566$ higher if their DMI is above median compared to if their DMI is below median.
+
+The intraclass correlation (ICC) captures the proportion of (unexplained) variation in depression levels at the subject level. Here, based on the Stata output above and the fact that we are using a cumulative logit model, the ICC is:
+
+```{r}
+#| output: FALSE
+5.773529 / (5.773529 + (pi^2/3))
+```
+
+$$
+r = \frac{\sigma^2_\upsilon}{\sigma^2_\upsilon + \sigma^2} \approx \frac{5.774}{5.774 + (\pi^2/3)} \approx 0.637.
+$$
+
+```{r}
+#| output: FALSE
+stata(
+'infile id hdrsc hdrs2 hdrs3 one week dmi2 dmi2_week dmic dmic_week ///
+using RIESORD3.RRM.txt, clear
+
+quietly recode hdrsc hdrs2 hdrs3 dmi2 dmi2_week dmic dmic_week (-9 = .)
+
+quietly meologit hdrs3 week dmi2 || id:
+
+quietly predict p_marg1 p_marg2 p_marg3, marginal
+quietly tabulate hdrs3, generate(hdrs3i)
+collapse (mean) p1obs=hdrs3i1 p2obs=hdrs3i2 p3obs=hdrs3i3 ///
+                p1est=p_marg1 p2est=p_marg2 p3est=p_marg3, by(dmi2 week)
+quietly drop if dmi2 == .
+list, table noobs separator(4)
+')
+```
+
+# Question 2
+
+**Now, still including `week` and `dmi2` as predictors, fit a model with random subject intercepts and week effects (and allow for the covariance of these two random effects). Is this model significantly better than the random-intercepts model? Interpret the effects of `week` and `dmi2`.**
+
+Now, we estimate the following mixed effects ordinal logistic regression model:
+
+[Within-Subjects Model:]{.underline}
+
+$$
+\lambda_{ijc} = \gamma_c - \bigl[ b_{0i} + b_{1i} \cdot Week_{ij} + b_{2i} \cdot DMI2_{ij} \bigr]
+$$
+
+where:
+
+-   $i = 1, \ldots, 250$ individuals,
+
+-   $j = 1, \ldots, n_i$ observations for each patient $i$ (with $n_i \in \{3, 4\} \;\forall i$),
+
+-   $c = 1, 2$, corresponding to the cutoffs (1) between "normal" mental health and "mild" or "definite" depression, and (2) between "normal" mental health or "mild" depression and "definite" depression, and
+
+-   $\lambda_{ijc} = \log \biggl( \frac{\mathbb{P}(HDRS3_{ij} \le c)} {1 - \mathbb{P}(HDRS3_{ij} \le c)} \biggr)$,
+
+and:
+
+-   $\gamma_c$ is the log odds of experiencing depression of level $(c-1)$ or below, relative to levels $c$ and above, as of Week 2 and assuming DMI levels are below median. In particular, $\gamma_1$ is the log odds of experiencing "normal" mental health relative to experiencing depression, while $\gamma_2$ is the log odds of experiencing non-"definite" depression relative to "definite" depression, in each case as of Week 2 and assuming DMI levels are below median,
+
+-   $b_{0i}$ is patient $i$'s log odds of having depression at a level less than $c$ as of Week 2, assuming their DMI levels are below median, for $c \in \{1, 2\}$,
+
+-   $b_{1i}$ is patient $i$'s weekly linear change in the log odds of having depression at a level less than $c$, for $c \in \{1, 2\}$, and
+
+-   $b_{2i}$ is the difference between patient $i$'s log odds of having depression at a level less than $c$ if their DMI levels were above median compared to if their DMI levels were below median, for $c \in \{1, 2\}$.
+
+[Between-Subjects Model:]{.underline}
+
+$$
+\begin{aligned}
+b_{0i} &= \upsilon_{0i} \\
+b_{1i} &= \beta_1 + \upsilon_{1i} \\
+b_{2i} &= \beta_2 \\
+(\upsilon_{0i}, \upsilon_{1i}) &\sim \mathrm{i.i.d.} \; \mathcal{N} (0,\Sigma_\upsilon)
+\end{aligned}
+$$
+
+where:
+
+-   $\upsilon_{0i}$ is patient $i$'s deviation from the "typical patient's" log odds of having depression at a level less than $c$ as of Week 2, assuming their DMI levels are below median, for $c \in \{1,2\}$,
+
+-   $\beta_1$ is the weekly linear change in a given patient's log odds of having depression at a level less than $c$, for given values of $\upsilon_{0i}$ and $\upsilon_{1i}$, for $c \in \{1, 2\}$,
+
+-   $\upsilon_{1i}$ is patient $i$'s deviation from the "typical patient's" weekly linear change in the log odds of having depression at a level less than $c$, for $c \in \{1, 2\}$, and
+
+-   $\beta_2$ is the difference between a given patient's log odds of having depression at a level less than $c$ if their DMI levels were above the median compared to if their DMI levels were below the median, for given values of $\upsilon_{0i}$ and $\upsilon_{1i}$, for $c \in \{1, 2\}$.
+
+```{r}
+stata(
+'infile id hdrsc hdrs2 hdrs3 one week dmi2 dmi2_week dmic dmic_week ///
+using RIESORD3.RRM.txt, clear
+
+quietly recode hdrsc hdrs2 hdrs3 dmi2 dmi2_week dmic dmic_week (-9 = .)
+
+meologit hdrs3 week dmi2 || id: week, covariance(unstructured)
+')
+```
+
+To compare this model to the random intercept model estimated in Question (1), we test the null hypothesis $H_0: \sigma^2_{\upsilon_1} = \sigma_{\upsilon_0 \upsilon_1} = 0$ against the alternative hypothesis $H_1: \sigma^2_{\upsilon_1} \ne 0 \; \mathrm{or} \; \sigma_{\upsilon_0 \upsilon_1} \ne 0$. Since there are two parameters in our null hypothesis ($\sigma^2_{\upsilon_1}$ and $\sigma_{\upsilon_0 \upsilon_1}$), we use a chi-bar-squared test employing a 50:50 mixture of a $\chi^2_2$ distribution and a $\chi^2_1$ distribution. The test statistic is $LR \; \chi^2 = -2 \times \bigl( -194.05154 - (-190.3441) \bigr) = 7.41488$. As shown below, we recover a $p$-value of approximately $0.016 < 0.05$, so we reject the null hypothesis that there is not subject-level variation in the linear time trend of depression levels in favor of the alternative hypothesis that there *is* subject-level variation in the linear time trend of depression levels.
+
+```{r}
+stata(
+'display 0.5*chi2tail(2, 7.41488) + 0.5*chi2tail(1, 7.41488)
+')
+```
+
+As summarized in the Stata output above, we now find that:
+
+-   The log odds of experiencing "normal" mental health relative to experiencing depression as of Week 2 for below-median DMI levels is approximately $-7.362$.
+
+-   The log odds of experiencing "normal" mental health or "mild" depression relative to experiencing "definite" depression as of Week 2 and for below-median DMI levels is approximately $-2.536$.
+
+-   Each week, a given patient's (i.e., holding $\upsilon_{0i}$ and $\upsilon_{1i}$ fixed) log odds of having depression at a level less than $c$ increase by approximately $1.419$, for $c \in \{1, 2\}$.
+
+-   A given patient's (i.e., holding $\upsilon_{0i}$ and $\upsilon_{1i}$ fixed) log odds of having depression at a level less than $c$ are approximately $1.824$ higher if their DMI is above median compared to if their DMI is below median.
+
+```{r}
+#| output: FALSE
+
+stata(
+'infile id hdrsc hdrs2 hdrs3 one week dmi2 dmi2_week dmic dmic_week ///
+using RIESORD3.RRM.txt, clear
+
+quietly recode hdrsc hdrs2 hdrs3 dmi2 dmi2_week dmic dmic_week (-9 = .)
+
+quietly meologit hdrs3 week dmi2 || id: week, covariance(unstructured)
+
+quietly predict p_marg1 p_marg2 p_marg3, marginal
+quietly tabulate hdrs3, generate(hdrs3i)
+collapse (mean) p1obs=hdrs3i1 p2obs=hdrs3i2 p3obs=hdrs3i3 ///
+                p1est=p_marg1 p2est=p_marg2 p3est=p_marg3, by(dmi2 week)
+quietly drop if dmi2 == .
+list, table noobs separator(4)
+')
+```
+
+# Question 3
+
+**Test whether the effect of `dmi2` varies across time. Write down the multilevel model for this. What do you conclude about the effect of `dmi2` on `hdrs3`?**
+
+Finally, we estimate the following mixed effects ordinal logistic regression model:
+
+[Within-Subjects Model:]{.underline}
+
+$$
+\lambda_{ijc} = \gamma_c - \bigl[ b_{0i} + b_{1i} \cdot Week_{ij} + b_{2i} \cdot DMI2_{ij} + b_{3i} \cdot Week_{ij} \times DMI2_{ij} \bigr]
+$$
+
+where:
+
+-   $i = 1, \ldots, 250$ individuals,
+
+-   $j = 1, \ldots, n_i$ observations for each patient $i$ (with $n_i \in \{3, 4\} \;\forall i$),
+
+-   $c = 1, 2$, corresponding to the cutoffs (1) between "normal" mental health and "mild" or "definite" depression, and (2) between "normal" mental health or "mild" depression and "definite" depression, and
+
+-   $\lambda_{ijc} = \log \biggl( \frac{\mathbb{P}(HDRS3_{ij} \le c)} {1 - \mathbb{P}(HDRS3_{ij} \le c)} \biggr)$,
+
+and:
+
+-   $\gamma_c$ is the log odds of experiencing depression of level $(c-1)$ or below, relative to levels $c$ and above, as of Week 2 and assuming DMI levels are below median. In particular, $\gamma_1$ is the log odds of experiencing "normal" mental health relative to experiencing depression, while $\gamma_2$ is the log odds of experiencing non-"definite" depression relative to "definite" depression, in each case as of Week 2 and assuming DMI levels are below median,
+
+-   $b_{0i}$ is patient $i$'s log odds of having depression at a level less than $c$ as of Week 2, assuming their DMI levels are below median, for $c \in \{1, 2\}$,
+
+-   $b_{1i}$ is patient $i$'s weekly linear change in the log odds of having depression at a level less than $c$, given that their DMI levels are below median, for $c \in \{1, 2\}$,
+
+-   $b_{2i}$ is the difference between patient $i$'s log odds of having depression at a level less than $c$ if their DMI levels were above median compared to if their DMI levels were below median, for $c \in \{1, 2\}$, and
+
+-   $b_{3i}$ is the difference between patient $i$'s weekly linear change in the log odds of having depression at a level less than $c$ given that their DMI levels are above median compared to if their DMI levels were below median, for $c \in \{1, 2\}$.
+
+[Between-Subjects Model:]{.underline}
+
+$$ \begin{aligned}  
+b_{0i} &= \upsilon_{0i} \\
+b_{1i} &= \beta_1 + \upsilon_{1i} \\ 
+b_{2i} &= \beta_2 \\
+b_{3i} &= \beta_3 \\
+(\upsilon_{0i}, \upsilon_{1i}) &\sim \mathrm{i.i.d.} \; \mathcal{N} (0,\Sigma_\upsilon) 
+\end{aligned} $$
+
+where:
+
+-   $\upsilon_{0i}$ is patient $i$'s deviation from the "typical patient's" log odds of having depression at a level less than $c$ as of Week 2, assuming their DMI levels are below median, for $c \in \{1,2\}$,
+
+-   $\beta_1$ is the weekly linear change in a given patient's log odds of having depression at a level less than $c$, assuming that their DMI levels are below median, for given values of $\upsilon_{0i}$ and $\upsilon_{1i}$, for $c \in \{1, 2\}$,
+
+-   $\upsilon_{1i}$ is patient $i$'s deviation from the "typical patient's" weekly linear change in the log odds of having depression at a level less than $c$, for $c \in \{1, 2\}$,
+
+-   $\beta_2$ is the difference between a given patient's log odds of having depression at a level less than $c$ if their DMI levels were above the median compared to if their DMI levels were below median, for given values of $\upsilon_{0i}$ and $\upsilon_{1i}$, for $c \in \{1, 2\}$, and
+
+-   $\beta_3$ is the difference between a given patient's weekly linear change in the log odds of having depression at a level less than $c$ given that their DMI levels are above median compared to if their DMI levels were below median, for given values of $\upsilon_{0i}$ and $\upsilon_{1i}$, for $c \in \{1,2\}$.
+
+```{r}
+stata(
+'infile id hdrsc hdrs2 hdrs3 one week dmi2 dmi2_week dmic dmic_week ///
+using RIESORD3.RRM.txt, clear
+
+quietly recode hdrsc hdrs2 hdrs3 dmi2 dmi2_week dmic dmic_week (-9 = .)
+
+meologit hdrs3 week dmi2 dmi2_week || id: week, covariance(unstructured)
+')
+```
+
+As shown above, our coefficient estimate for the interaction of week and dichotomized DMI levels is *not* statistically significant, as it bears a $p$-value of $0.868 \gg 0.05$. Thus, there is *not* statistical evidence that the effect of `dmi2` on `hdrs3` varies across time. As such, our "final model" is the model we summarized in Question (2), wherein we found that a given patient's (i.e., holding $\upsilon_{0i}$ and $\upsilon_{1i}$ fixed) log odds of having depression at a level less than $c$ are approximately $1.824$ higher if their DMI is above median compared to if their DMI is below median, for $c \in \{1, 2\}$. We now conclude that this effect is constant across time.

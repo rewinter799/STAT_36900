@@ -1,0 +1,309 @@
+---
+title: "STAT 36900: Homework 3"
+author: "Robert Winter"
+format: pdf
+editor: visual
+
+highlight-style: pygments
+geometry:
+      - top=30mm
+      - left=30mm
+toc: true
+toc-title: Table of Contents
+number-sections: true
+
+echo: false
+warning: false
+
+# Wrap code chunk text
+include-in-header:
+  text: |
+    \usepackage{fvextra}
+    \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+---
+
+# Introduction
+
+**The data for this problem are from the Riesby *et al.*, article that we have discussed in class. This study examined the relationship in depressed inpatients between the drug plasma levels—the antidepressant imipramine (IMI) and its metabolite desimipramine (DMI)—and clinical response as measured by the Hamilton Depression Rating Scale (HDRS). In class, we noted that there was a significant relationship across time between the drug plasma levels (specifically, desimipramine) and depression. What I would like you to do for this assignment is examine the degree to which this posited relationship is influenced by the variance-covariance structure (of the dependent measure across time) that characterizes different statistical models of the data. The dataset `RIESBYT4.dat` is available on the class website and contains the following variables:**
+
+-   **field 1: Patient ID**
+
+-   **field 2: HDRS change from baseline score**
+
+-   **field 3: a field of ones (is "one" the loneliest variable?) — *ignore this variable***
+
+-   **field 4: Week — from 0 (Week 2) to 3 (Week 5)**
+
+-   **field 5: sex (0 = male, 1 = female) — *ignore this variable***
+
+-   **field 6: diagnostic group (0 = non-endogenous, 1 = endogenous)**
+
+-   **field 7: Imipramine (IMI) plasma levels (in** $\ln$ **units)**
+
+-   **field 8: Desimipramine (DMI) plasma levels (in** $\ln$ **units)**
+
+**For this problem (as in Problem Set 2), I would like you to combine the drug plasma levels into one variable—the natural log (**$\ln$**) of the ratio of DMI to IMI (*i.e.,*** $\ln(DMI) - \ln(IMI)$**). Let's denote this variable as LDIM. For this problem set do the following.**
+
+```{r}
+#| output: false
+
+library(RStata)
+# chooseStataBin()
+options("RStata.StataPath" = "\"C:\\Program Files\\Stata18\\StataBE-64\""
+)
+options("RStata.StataVersion" = 18)
+```
+
+```{r}
+#| output: false
+
+library(tidyverse)
+library(ggplot2)
+```
+
+```{r}
+#| output: false
+
+riesbyt4 = read.csv("C:/Users/rewin/OneDrive/Documents/STAT_36900/HW3/RIESBYT4.csv")
+```
+
+# Question 1
+
+**Consider a model with fixed effects of** $Week$**,** $Week^2$**,** $LDIM$**,** $ENDOG$**, and the interaction of** $ENDOG$ **by** $LDIM$**. Decide on either ML or REML estimation and then perform a covariance structure selection using ideas discussed in class. What covariance structure do you settle upon (note: you may want to consider a few models with random effects, and covariance pattern models)? What criteria do you use to make this selection? What is your interpretation of the covariance structure and fixed effects in your model? Summarize your findings.**
+
+Below, we consider seven different models, each with the above fixed effects, but with varying variance-covariance structures. In particular, we consider: (1) a covariance pattern model (CPM) with an unstructured conditional variance-covariance matrix, (2) a CPM with Toeplitz-structured conditional variance-covariance matrix, (3) a CPM with AR(1)-structured conditional variance-covariance matrix, (4) a CPM with compound symmetry (exchangeable)-structured conditional variance-covariance matrix, (5) a mixed effects model with random intercepts, random linear time trends, and random quadratic time trends, (6) a mixed effects model with random intercepts and random linear time trends, and (7) a mixed effects model with random intercepts only. Since we are using the same set of fixed effects in each model (and will not be performing any feature selection in this assignment), we use REML estimation to estimate each model.[^1] Since each of models (2) – (7) are nested within model (1), we begin by comparing the results of each to model (1) using a likelihood ratio test, which tests the null hypothesis that a given model's variance-covariance parameters are equal to those of the unstructured model. Following the code output below, we summarize our model comparisons and select our final variance-covariance structure.
+
+[^1]: See, e.g., Hedeker & Gibbons, *Longitudinal Data Analysis*, page 79.
+
+```{r}
+stata(
+'infile id deltaHDRS one week sex endog lnimi lndmi ///
+using RIESBYT4.DAT.txt, clear
+generate ldim = lndmi - lnimi
+generate week2 = week * week
+generate endog_ldim = endog * ldim
+
+**** CPMs ****
+
+* Unstructured
+mixed deltaHDRS week week2 ldim endog endog_ldim, ///
+      || id:, noconstant residuals(unstructured, t(week)) reml
+estimates store m_ustr
+      
+* Toeplitz Structure
+mixed deltaHDRS week week2 ldim endog endog_ldim, ///
+      || id:, noconstant residuals(toeplitz, t(week)) reml
+estimates store m_tplz
+      
+* AR(1) Structure
+mixed deltaHDRS week week2 ldim endog endog_ldim, ///
+      || id:, noconstant residuals(ar 1, t(week)) reml
+estimates store m_ar1
+
+* Compound Symmetry (Exchangeable) Structure
+mixed deltaHDRS week week2 ldim endog endog_ldim, ///
+      || id:, noconstant residuals(exchangeable) reml
+estimates store m_exch
+
+**** MRMs ****
+
+*Random Intercept, Linear Trend, and Quadratic Trend
+mixed deltaHDRS week week2 ldim endog endog_ldim, ///
+      || id: week week2, covariance(unstructured) reml
+estimates store m_rand1
+
+* Random Intercept and Linear Trend
+mixed deltaHDRS week week2 ldim endog endog_ldim, ///
+      || id: week, covariance(unstructured) reml
+estimates store m_rand2
+
+* Random Intercept
+mixed deltaHDRS week week2 ldim endog endog_ldim, ///
+      || id:, reml
+estimates store m_rand3
+
+**** LR Tests ****
+
+* Stage 1: Compared to Unstructured CPM
+lrtest m_ustr m_tplz
+lrtest m_ustr m_ar1
+lrtest m_ustr m_exch
+lrtest m_ustr m_rand1
+lrtest m_ustr m_rand2
+lrtest m_ustr m_rand3
+
+# Stage 2: Compare viable candidates
+lrtest m_rand1 m_rand2
+
+')
+```
+
+```{r}
+#| output: false
+
+### Manual LR tests ###
+
+# Unstructured vs. Toeplitz
+1 - pchisq(-2*(-750.79717-(-740.01042)), (4*(4+1))/2 - 4)
+
+# Unstructured vs. AR(1)
+1 - pchisq(-2*(-752.21791-(-740.01042)), (4*(4+1))/2 - 2)
+
+# Unstructured vs. CS
+1 - pchisq(-2*(-758.62301-(-740.01042)), (4*(4+1))/2 - 2)
+
+# Unstructured vs. Random Intercept, Linear Trend, & Quadratic Trend
+1 - pchisq(-2*(-741.41765-(-740.01042)), (4*(4+1))/2 - (1 + 6))
+
+# Unstructured vs. Random Intercept & Linear Trend
+1 - pchisq(-2*(-746.14641-(-740.01042)), (4*(4+1))/2 - (1 + 3))
+
+# Unstructured vs. Random Intercept ---- identical to CS
+1 - pchisq(-2*(-758.62301-(-740.01042)), (4*(4+1))/2 - (1+1))
+
+# Random Intercept & Linear Trend vs. Random Intercept, Linear Trend, & Quad Trend
+1 - pchisq(-2*(-746.14641-(-741.41765)), (1+6) - (1+3))
+```
+
++-----------+--------------------------------------------------------+---------------------------+--------------------------------+-------------------------------+------------------------------------+
+| Model No. | Model                                                  | Log Restricted-Likelihood | LR $\chi^2$ Test $d.f$ vs. (1) | LR $\chi^2$ Statistic vs. (1) | LR $\chi^2$ Test $p$-value vs. (1) |
++:=========:+:======================================================:+:=========================:+:==============================:+:=============================:+:==================================:+
+| \(1\)     | CPM: Unstructured                                      | $-740.01042$              | N/A                            | N/A                           | N/A                                |
++-----------+--------------------------------------------------------+---------------------------+--------------------------------+-------------------------------+------------------------------------+
+| \(2\)     | CPM: Toeplitz                                          | $-750.79717$              | $6$                            | $21.57$                       | $0.0014$                           |
++-----------+--------------------------------------------------------+---------------------------+--------------------------------+-------------------------------+------------------------------------+
+| \(3\)     | CPM: AR(1)                                             | $-752.21791$              | $8$                            | $24.41$                       | $0.0020$                           |
++-----------+--------------------------------------------------------+---------------------------+--------------------------------+-------------------------------+------------------------------------+
+| \(4\)     | CPM: Compound Symmetry                                 | $-758.62301$              | $8$                            | $37.23$                       | $<0.001$                           |
++-----------+--------------------------------------------------------+---------------------------+--------------------------------+-------------------------------+------------------------------------+
+| \(5\)     | MRM: Random Intercept, Linear Trend, & Quadratic Trend | $-741.41765$              | $3$                            | $2.81$                        | $0.4211$                           |
++-----------+--------------------------------------------------------+---------------------------+--------------------------------+-------------------------------+------------------------------------+
+| \(6\)     | MRM: Random Intercept & Linear Trend                   | $-746.14641$              | $6$                            | $12.27$                       | $0.0562$                           |
++-----------+--------------------------------------------------------+---------------------------+--------------------------------+-------------------------------+------------------------------------+
+| \(7\)     | MRM: Random Intercept                                  | $-758.62301$              | $8$                            | $37.23$                       | $<0.001$                           |
++-----------+--------------------------------------------------------+---------------------------+--------------------------------+-------------------------------+------------------------------------+
+
+All of the likelihood ratio tests performed and summarized in the table above are conservative relative to a chi-bar-squared likelihood ratio test, meaning that the $p$-values reported are slightly higher than the "true" $p$-values for these comparisons. As shown, models (2), (3), (4), and (7) yield estimates that are statistically significantly different (at the $\alpha = 0.05$ level) than those yielded by model (1). Given that our likelihood ratio tests are conservative, we can be confident that each of these models are significantly different than model (1), and we reject them.
+
+Moreover, model (5) yields estimates that are clearly not significantly different from those of model (1), making it a candidate for our final model. Model (6) yields estimates that are "on the margin" of being significantly different from those of model (1), as we recover a $p$-value of $0.0562 \approx 0.05$ from our likelihood ratio test. Since our likelihood ratio tests are conservative, it is entirely plausible that the "true" $p$-value is below $0.05$, in which case this model would be significantly different from model (1). Nevertheless, in an effort to check all plausible models, we also consider model (6) as a candidate for our final model. Since model (6) is nested within model (5), we use a likelihood ratio test to compare the two (as shown at the bottom of the Stata output above). This comparison yields a $\chi^2$ statistic of 9.46 and a corresponding $p$-value of $0.0238 < 0.05$, meaning that models (5) and (6) yield significantly different estimates from one another. Since we wish to select a variance-covariance structure that yields estimates that are *not* significantly different from those of the unstructured CPM model, but that use as few parameters as possible, we select model (5) as our final model.
+
+That is, our final model is as follows:
+
+[Within-Subjects Model:]{.underline}
+
+$$
+\Delta HDRS_{ij} = b_{0i} + b_{1i} \cdot Week_{ij} + b_{2i} \cdot Week^2_{ij} + b_{3i} \cdot LDIM_{ij} + \varepsilon_{ij}
+$$
+
+where:
+
+-   $i = 1, \ldots, 66$ individuals, and
+
+-   $j = 1, \ldots, n_i$ observations ($3 \le n_i \le 4$) for patient $i$,
+
+and:
+
+-   $b_{0i}$ is patient $i$'s change in HDRS score from her baseline score as of Week 2, given that her DMI and IMI plasma levels are equal (so that $LDIM_{ij} = 0$),
+
+-   $b_{1i}$ is patient $i$'s average weekly linear incremental (i.e., from the previous week) change in HDRS score,
+
+-   $b_{2i}$ is patient $i$'s average weekly quadratic incremental (i.e., from the previous week) change in HDRS score, and
+
+-   $b_{3i}$ is the average incremental change in patient $i$'s HDRS score associated with a one-unit increase in the log of the ratio of her DMI to IMI plasma levels.
+
+[Between-Subjects Model:]{.underline}
+
+$$
+\begin{aligned}
+b_{0i} &= \beta_0 + \beta_4 \cdot ENDOG_i + \upsilon_{0i} \\
+b_{1i} &= \beta_1 + \upsilon_{1i} \\
+b_{2i} &= \beta_2 + \upsilon_{2i} \\
+b_{3i} &= \beta_3 + \beta_5 \cdot ENDOG_i
+\end{aligned}
+$$
+
+where:
+
+-   $\beta_0$ is the average change in HDRS score from baseline as of Week 2 among patients with non-endogenous depression, given that DMI and IMI plasma levels are equal (so that $LDIM = 0$),
+
+-   $\beta_4$ is the difference in average HDRS change scores as of Week 2 between patients with endogenous and non-endogenous depression, given that DMI and IMI plasma levels are equal (so that $LDIM = 0$),
+
+-   $\upsilon_{0i}$ is individual $i$'s deviation from the average change in HDRS score from baseline as of Week 2,
+
+-   $\beta_1$ is the average weekly linear incremental change in HDRS score across all patients,
+
+-   $\upsilon_{1i}$ is patient $i$'s deviation from the average weekly linear incremental change in HDRS score,
+
+-   $\beta_2$ is the average weekly quadratic incremental change in HDRS score across all patients,
+
+-   $\upsilon_{2i}$ is patient $i$'s deviation from the average weekly quadratic incremental change in HDRS score,
+
+-   $\beta_3$ is the average incremental change in HDRS score associated with a one unit increase in the log of the ratio of a patient's DMI to IMI plasma levels among patients with non-endogenous depression, and
+
+-   $\beta_5$ is the difference between the average incremental changes in HDRS score associated with a one-unit increase of $LDIM$ between patients with endogenous and non-endogenous depression.
+
+So,
+
+-   $\beta_0 + \beta_4$ is the average change in HDRS score from baseline as of Week 2 among patients with endogenous depression, and
+
+-   $\beta_3 + \beta_5$ is the average incremental change in HDRS score associated with a one unit increase in the log of the ratio of a patient's DMI to IMI plasma levels among patients with endogenous depression.
+
+# Question 2
+
+**Suppose Researcher A says "covariance structure, my foot! If compound symmetry is good enough for my hairstyle, it's good enough for me!" and decides to do an analysis using the same fixed effects as above, but only allowing for a CS structure on the dependent variable across time. Is Researcher A likely to report any dubious findings with regards to the fixed effects in the model?**
+
+In general, the choice of variance-covariance structure does not substantially affect the estimates of fixed effects, but can have a significant effect on the standard errors of those fixed effects estimates.[^2] In the table below, we compare each covariate's fixed effects estimates, their standard errors, and their $p$-values between our final model (model (5), with random intercepts, linear time trends, and quadratic time trends) and a model with compound symmetry (CS) structure (model (4)). First, notice that the coefficient estimates are not too different between each model. More importantly, notice that the CS model gives higher standard errors for every coefficient estimate than our final model. This means that the CS model's confidence intervals for coefficient estimates are wider than our final model's, and $p$-values are larger. In other words, Researcher A is prone to Type II errors, or "missing out" on identifying statistically significant fixed effects. In fact, this actually happens: while we recover a $p$-value on the $ENDOG \times LDIM$ fixed effect of $0.038 < 0.05$, Researcher A recovers a fixed effect with $p$-value $0.139 > 0.05$. This means that he fails to find that the effect of $LDIM$ on HDRS change scores differs between patients with non-endogenous and endogenous depression—even though our analysis showed that this underlying relationship exists.
+
+[^2]: See, e.g., Hedeker & Gibbons, *Longitudinal Data Analysis*, page 129.
+
++-----------------------+----------+-----------+-----------+----------+-----------+-----------+
+| **Regressor**         | Coef.    | **Final** | $p$-value | Coef.    | **CS**    | $p$-value |
+|                       |          |           |           |          |           |           |
+|                       |          | Std. Err. |           |          | Std. Err. |           |
++:=====================:+:========:+:=========:+:=========:+:========:+:=========:+:=========:+
+| Intercept             | $-3.987$ | $1.080$   | $<0.001$  | $-4.041$ | $1.286$   | $0.002$   |
++-----------------------+----------+-----------+-----------+----------+-----------+-----------+
+| $Week$                | $-1.988$ | $0.707$   | $0.005$   | $-1.874$ | $0.776$   | $0.016$   |
++-----------------------+----------+-----------+-----------+----------+-----------+-----------+
+| $Week^2$              | $-0.017$ | $0.236$   | $0.942$   | $-0.060$ | $0.249$   | $0.811$   |
++-----------------------+----------+-----------+-----------+----------+-----------+-----------+
+| $LDIM$                | $-2.879$ | $0.875$   | $0.001$   | $-2.523$ | $0.947$   | $0.008$   |
++-----------------------+----------+-----------+-----------+----------+-----------+-----------+
+| $ENDOG$               | $-0.115$ | $1.421$   | $0.936$   | $-0.198$ | $1.661$   | $0.905$   |
++-----------------------+----------+-----------+-----------+----------+-----------+-----------+
+| $ENDOG \times LDIM$   | $2.258$  | $1.088$   | $0.038$   | $1.811$  | $1.224$   | $0.139$   |
++-----------------------+----------+-----------+-----------+----------+-----------+-----------+
+
+# Question 3
+
+**Suppose Researcher B says "covariance structure, my eye! If unstructured is good enough for my closet, it's good enough for me!" and decides to do the same analysis, but using an unstructured covariance structure for the dependent variable across time. Is Researcher B likely to report any dubious findings with regards to the fixed effects in the model?**
+
+In the table below, we compare each covariate's fixed effects estimates, their standard errors, and their $p$-values between our final model (model (5), with random intercepts, linear time trends, and quadratic time trends) and a model with an unstructured variance-covariance matrix (model (1)). Once again, the coefficient estimates produced by the two models are fairly similar. This time, however, the standard errors of these coefficient estimates are also very similar across the two models. This means that the unstructured model's confidence intervals for coefficient estimates are about as wide as the corresponding confidence intervals in our final model, so that both models should have similar findings regarding the statistical significance (or lack thereof) of different covariates' effects. Indeed, as shown below, the $p$-values for each coefficient estimate reported by the two models are very similar, and in some cases are even identical. This means that—at the $\alpha = 0.05, 0.01,$ or $0.001$ levels—when our model finds a statistically significant relationship between a covariate and HDRS change scores, so does Researcher B's model, and when our model finds that a coefficient estimate is not statistically significant, so does Researcher B's model. In short, since her coefficient estimates and corresponding $p$-values are both very close to our own, Researcher B is unlikely to report any dubious findings with regard to fixed effects.
+
++-----------------------+----------+-----------+-----------+----------+-----------+-----------+
+| **Regressor**         | Coef.    | **Final** | $p$-value | Coef.    | **Unst.** | $p$-value |
+|                       |          |           |           |          |           |           |
+|                       |          | Std. Err. |           |          | Std. Err. |           |
++:=====================:+:========:+:=========:+:=========:+:========:+:=========:+:=========:+
+| Intercept             | $-3.987$ | $1.080$   | $<0.001$  | $-3.991$ | $1.084$   | $<0.001$  |
++-----------------------+----------+-----------+-----------+----------+-----------+-----------+
+| $Week$                | $-1.988$ | $0.707$   | $0.005$   | $-1.817$ | $0.698$   | $0.009$   |
++-----------------------+----------+-----------+-----------+----------+-----------+-----------+
+| $Week^2$              | $-0.017$ | $0.236$   | $0.942$   | $-0.096$ | $0.232$   | $0.680$   |
++-----------------------+----------+-----------+-----------+----------+-----------+-----------+
+| $LDIM$                | $-2.879$ | $0.875$   | $0.001$   | $-2.934$ | $0.880$   | $0.001$   |
++-----------------------+----------+-----------+-----------+----------+-----------+-----------+
+| $ENDOG$               | $-0.115$ | $1.421$   | $0.936$   | $-0.096$ | $1.424$   | $0.946$   |
++-----------------------+----------+-----------+-----------+----------+-----------+-----------+
+| $ENDOG \times LDIM$   | $2.258$  | $1.088$   | $0.038$   | $2.250$  | $1.091$   | $0.039$   |
++-----------------------+----------+-----------+-----------+----------+-----------+-----------+
+
+# Question 4
+
+**Summarize your feelings regarding covariance structure selection, and its place in statistical modeling of longitudinal data.**
+
+Covariance structure selection plays multiple important roles in the statistical analysis of longitudinal data. Firstly, understanding the covariance structure of repeated measures—as well as estimating the corresponding variance and covariance parameters—is often important in its own right. For example, to determine whether a medical intervention should be one-time or recurring (e.g., should a patient receive just one session of hypotherapy, or monthly sessions?), researchers may want to understand how much a patient's health levels at one point in time are correlated with their health levels at another point in time, as well as if this correlation tapers off over greater gaps in time. This is precisely the kind of information that can be gleaned through the covariance structure selection process.
+
+Moreover, even if a researcher is not specifically interested in estimating covariance parameters, selecting an appropriate covariance structure is crucial for proper inference regarding fixed effects. As we saw in Question 2 above, failure to properly specify a model's covariance structure can alter coefficient estimates, and even worse, can increase the risk of Type II errors (failing to find a statistically significant relationship when one is actually there). As such, it is always important for a researcher to do her due diligence in specifying a covariance structure for longitudinal data.
+
+My feelings about covariance structure selection are positive! I have never given much thought to estimating variance and covariance parameters before, as my focus has always been on fixed effects estimates/$\beta$'s. Our survey of covariance structure selection techniques has given me a greater appreciation for the other kinds of relationships that can exist within data. It is also striking how coefficient estimates and standard errors can be so sensitive to the choice of covariance structure, even when the estimation procedure (e.g., maximum likelihood, REML, least squares) is held the same. This has definitely piqued my interest in understanding the mechanics of parameter estimation.

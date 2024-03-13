@@ -1,0 +1,517 @@
+---
+title: "STAT 36900: Homework 4"
+author: "Robert Winter"
+format: pdf
+editor: visual
+
+highlight-style: pygments
+geometry:
+      - top=30mm
+      - left=30mm
+toc: true
+toc-title: Table of Contents
+number-sections: true
+
+echo: false
+warning: false
+
+# Wrap code chunk text
+include-in-header:
+  text: |
+    \usepackage{fvextra}
+    \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+---
+
+# Introduction
+
+**The data for this problem come from a randomized clinical trial to determine the efficacy of the drug auranofin versus placebo in the treatment of rheumatoid arthritis (Bombardier *et al.*, 1986, Auranofin therapy and quality of life in patients with rheumatoid arthritis, *American Journal of Medicine, 81,* 565–578).**
+
+**The outcome of interest is self-assessment of arthritis, coded as `0` = poor and `1` = good. Individuals were randomized to one of the two treatment groups after baseline self-assessment of arthritis, and then took the treatment for the length of the study. All 294 patients were observed at baseline, and 1 and 3 months after randomization. The self-assessment of arthritis at these three timepoints represent the responses of the dichotomous dependent variable across time. These data are provided at the class Canvas website as `arthritb.dat.txt`. The variables in the dataset are `ID` (subject ID), `ARTHRIT` (dependent variable coded `0` = poor and `1` = good), `TXAURA` (treatment group coded `0` = placebo and `1` = auranofin), and `TIME` (coded `0` = baseline, `1` = Month 1, and `2` = Month 3).**
+
+**For this problem, use dummy-codes for the effect of time treating baseline as the reference cell. Let's call the resulting two dummy-codes `TIMEA` and `TIMEB`. Given that randomization was done after the baseline assesment, and therefore subjects are the same at baseline, use the following regressors: `TIMEA`, `TIMEB`, `TX*TIMEA`, and `TX*TIMEB`. Note that, here, not include `TX`, which would represent the group difference at baseline, is a very special case. Normally, one includes all component variables of interactions in the model. However, here, because the groups have not yet received treatment at baseline, and because it is a randomized study, these groups are the same at baseline.**
+
+```{r}
+#| output: false
+
+library(RStata)
+# chooseStataBin()
+options("RStata.StataPath" = "\"C:\\Program Files\\Stata18\\StataBE-64\""
+)
+options("RStata.StataVersion" = 18)
+```
+
+```{r}
+#| output: false
+
+library(tidyverse)
+library(ggplot2)
+library(reshape2)
+```
+
+```{r}
+#| output: false
+
+arthritb = read.csv("C:/Users/rewin/OneDrive/Documents/STAT_36900/HW4/arthritb.csv")
+```
+
+# Question 1
+
+**Based on the observed correlations, select a reasonable working correlation structure and estimate a GEE logistic regression model with the above four regressors. Describe the meaning of the estimated regression coefficients in this model. Is there evidence of a treatment effect? If so, is the effect seen at both follow-ups? How well does the model fit the observed proportions for the two groups at the three timepoints?**
+
+In the table below, we present the pairwise Spearman correlations between patients' arthritis ratings at times `0` (baseline), `1` (Month 1), and `2` (Month 3). Notably, the correlations between times `0` and `1` and times `1` and `2` are very similar: the former is roughly $0.435$, while the latter is roughly $0.448$. Having roughly the same correlation between two different pairs of consecutive timepoints suggests that a stationary $m$-dependent working correlation structure may be appropriate here. (Without more timepoints to study, we can't tell whether or not there is a geometric relationship between correlations for progressively larger lags, so we cannot say whether an AR(1) structure would be even more appropriate.) It is important to acknowledge that the timepoints in this study were not evenly spaced: there was a one-month gap between times `0` and `1`, but a two-month gap between times `1` and `2`. For the sake of this assignment, we assume that the timepoints were evenly spaced and move forward with a stationary $m$-dependent structure fo the working correlation matrix.
+
+```{r}
+stata(
+'infile id arthrit txaura time ///
+using arthritb.dat.txt, clear
+
+* Reshape to wide format
+quietly reshape wide arthrit, i(id) j(time)
+
+* Generate Spearman correlation matrix
+spearman arthrit0 arthrit1 arthrit2
+')
+```
+
+```{r}
+#| output: false
+
+### Checking correlation calculations in R
+
+# Reshape data to wide
+arthritb_wide = reshape(arthritb, idvar = "ID", timevar = "TIME", direction = "wide") %>%
+  subset(select = -TXAURA.0) %>%
+  subset(select = -TXAURA.1)
+names(arthritb_wide)[names(arthritb_wide) == "TXAURA.2"] = "TXAURA"
+
+# Pairwise Spearman correlations
+cor(arthritb_wide$ARTHRIT.0, arthritb_wide$ARTHRIT.1, method = "spearman")
+cor(arthritb_wide$ARTHRIT.0, arthritb_wide$ARTHRIT.2, method = "spearman")
+cor(arthritb_wide$ARTHRIT.1, arthritb_wide$ARTHRIT.2, method = "spearman")
+```
+
+Thus, we estimate the following GEE model:
+
+$$
+\begin{aligned}
+\eta_{ij} = & \;\beta_0 + \beta_1 \cdot TimeA_j + \beta_2 \cdot TimeB_j \\\ & + \beta_3 \cdot TX_i \times TimeA_j + \beta_4 \cdot TX_i \times TimeB_j
+\end{aligned}
+$$
+
+where:
+
+-   $i = 1, \ldots, 294$ individuals,
+
+-   $j = 1, 2, 3$ observations for each patient $i$, and
+
+-   $\eta_{ij} = \log \biggl( \frac{\mathbb{P}(Arthrit_{ij}=1)}{1 - \mathbb{P}(Arthrit_{ij}=1)} \biggr)$,
+
+and
+
+-   $\beta_0$ is the population average log odds of reporting "good" arthritis at baseline (across patients in the placebo and auranofin-treated groups),
+
+-   $\beta_1$ is the average change in the log odds of reporting "good" arthritis as of Month 1 compared to baseline among patients in the placebo group,
+
+-   $\beta_2$ is the average change in the log odds of reporting "good" arthritis as of Month 3 compared to baseline among patients in the placebo group,
+
+-   $\beta_3$ is the difference in the average change in the log odds of reporting "good" arthritis as of Month 1 compared to baseline between patients in the treated and placebo groups, and
+
+-   $\beta_4$ is the difference in the average change in the log odds of reporting "good" arthritis as of Month 3 compared to baseline between patients in the treated and placebo groups.
+
+```{r}
+stata(
+'infile id arthrit txaura time ///
+using arthritb.dat.txt, clear
+generate timea = time==1
+generate timeb = time==2
+generate tx_timea = txaura * timea
+generate tx_timeb = txaura * timeb
+
+xtgee arthrit timea timeb tx_timea tx_timeb, ///
+  fam(bin) link(logit) i(id) t(time) corr(stationary 2) robust
+estat wcorr
+')
+```
+
+As summarized in the Stata output above, we find that:
+
+-   At baseline, the population average log odds of reporting "good" arthritis is approximately $-1.220$.
+
+-   One month after baseline, the average log odds of reporting "good" arthritis among patients in the placebo group increased by approximately $0.684$ relative to baseline.
+
+-   Three months after baseline, the average log odds of reporting "good" arthritis among patients in the placebo group increased by approximately $0.375$ relative to baseline; this estimate is (just barely) not statistically significant at the $\alpha = 0.05$ level.
+
+-   One month after baseline, the average log odds of reporting "good" arthritis among patients in the treated group was approximately $0.043$ higher than the average log odds of reporting "good" arthritis among patients in the placebo group. This estimate is not statistically significant, as discussed in greater detail below.
+
+-   Three months after baseline, the average log odds of reporting "good" arthritis among patients in the treated group was approximately $0.635$ higher than the average log odds of reporting "good" arthritis among patients in the placebo group.
+
+-   The estimated correlation matrix very closely resembles the empirical correlation matrix shown earlier.
+
+In particular, we find that there is evidence of a treatment effect, but only at the three months after baseline mark. Indeed, our estimate of $\beta_3$ is not only small, at around $0.043$, but is also not statistically significant, with a $p$-value of approximately $0.842 > 0.05$. As such, there is [not]{.underline} statistical evidence of a significant difference in the log odds of reporting "good" arthritis between the treatment and placebo groups one month after beginning treatment. Meanwhile, our estimate of $\beta_4$ is much larger, at around $0.635$, and is statistically significant, with a $p$-value of $0.006 < 0.01$. Thus, there [is]{.underline} statistical evidence of a significant difference in the log odds of reporting "good" arthritis between the treatment and placebo groups three months after beginning treatment.
+
+As shown in the table and plot below, our GEE model's fitted/estimated probabilities of reporting "good" arthritis (`pmarg`) very closely match the actual proportions observed in the data (`pobs`).
+
+```{r}
+stata(
+'infile id arthrit txaura time ///
+using arthritb.dat.txt, clear
+generate timea = time==1
+generate timeb = time==2
+generate tx_timea = txaura * timea
+generate tx_timeb = txaura * timeb
+
+quietly xtgee arthrit timea timeb tx_timea tx_timeb, ///
+  fam(bin) link(logit) i(id) t(time) corr(stationary 2) robust
+
+predict probs
+collapse (mean) pmarg=probs pobs=arthrit, by(txaura time)
+list time txaura pmarg pobs
+')
+```
+
+```{r}
+#| include: false
+
+### Equivalent computation of marginal probabilities using mata
+
+stata(
+'mata
+
+/* (Time, TX) */
+/* (Constant, TimeA, TimeB, TX*TimeA, TX*TimeB) */
+
+X = (1, 0, 0, 0, 0 \\
+     1, 1, 0, 0, 0 \\
+     1, 0, 1, 0, 0 \\
+     1, 0, 0, 0, 0 \\
+     1, 1, 0, 1, 0 \\
+     1, 0, 1, 0, 1)
+
+beta_gee = (-1.220257 \\
+             0.6840975 \\
+             0.3753876 \\
+             0.0432509 \\
+             0.6348553)
+             
+z = X * beta_gee
+mprob = invlogit(z)
+mprob
+
+end
+')
+```
+
+```{r}
+#| include: FALSE
+
+# Hand calculations of probabilities above
+pmarg = function(x){
+  return(exp(x) / (1+exp(x)))
+}
+
+p1 = pmarg(-1.220257) # baseline (beta0)
+p2 = pmarg(-1.220257 + 0.6840975) # placebo T1 (beta0 + beta1)
+p3 = pmarg(-1.220257 + 0.3753876) # placebo T2 (beta0 + beta2)
+p4 = pmarg(-1.220257 + 0.6840975 + 0.0432509) # treated T1 (beta0 + beta1 + beta3)
+p5 = pmarg(-1.220257 + 0.3753876 + 0.6348553) # treated T2 (beta0 + beta2 + beta4)
+```
+
+```{r}
+# scatterplot data for plotting
+obs = arthritb %>%
+  group_by(TIME, TXAURA) %>%
+  summarize(pobs = mean(ARTHRIT)) %>%
+  mutate(trt2 = ifelse(TXAURA == 0,
+                       "Placebo (Observed)",
+                       "Treatment (Observed)")) %>%
+  mutate(pest_GEE = 1)
+obs$pest_GEE = obs$pest_GEE * c(0.2278912, 0.2278912,
+                                0.3690813, 0.3792085,
+                                0.3005101, 0.4476885)
+
+plotdata1 = melt(obs, id.vars = c("TIME", "TXAURA", "trt2"))
+
+colors = c("Placebo (Estimated)" = "red",
+           "Treatment (Estimated)" = "blue",
+           "Placebo (Observed)" = "brown",
+           "Treatment (Observed)" ="purple")
+
+ggplot(plotdata1, aes(x = TIME, y = value, col = )) +
+  theme_bw() + 
+  geom_point(size = 3,
+             data = filter(plotdata1, TXAURA == 0, variable == "pobs"),
+             mapping = aes(color = "Placebo (Observed)")) +
+  geom_point(size = 3,
+             data = filter(plotdata1, TXAURA == 1, variable == "pobs"),
+             mapping = aes(color = "Treatment (Observed)")) +
+  geom_line(size = 1.2,
+             data = filter(plotdata1, TXAURA == 0, variable == "pest_GEE"),
+             mapping = aes(color = "Placebo (Estimated)")) +
+  geom_line(size = 1.2,
+             data = filter(plotdata1, TXAURA == 1, variable == "pest_GEE"),
+             mapping = aes(color = "Treatment (Estimated)")) +
+  scale_x_continuous(breaks = c(0:2),
+                     minor_breaks = NULL,
+                     n.breaks = 3,
+                     labels = c("Baseline", "Month 1", "Month 3")) +
+  # ylim(c(0, 1)) + 
+  xlab("Time of Measurement") +
+  ylab("Probability / Proportion") +
+  ggtitle('Estimated & Observed Probabilities of Reporting "Good" Arthritis') +
+  theme(plot.title = element_text(hjust = 0.5, size = 12)) +
+  theme(legend.position = "bottom") +
+  labs(col = NULL) +
+  scale_color_manual(values=colors) +
+  guides(color = guide_legend(nrow=2))
+```
+
+# Question 2
+
+**Estimate a random-intercepts (*i.e.*, mixed) model with the above four parameters. Describe the meaning of the estimated regression coefficients in this model. Is there evidence of a treatment effect? If so, is the effect seen at both follow-ups? How well does the model fit the observed proportions for the two groups at the three timepoints?**
+
+We estimate the following mixed model:
+
+[Within-Subjects Model:]{.underline}
+
+$$
+\eta_{ij}
+= b_{0i} + b_{1i} \cdot TimeA_{j} + b_{2i}\cdot TimeB_{j}
+$$
+
+where:
+
+-   $i = 1, \ldots, 294$ individuals,
+
+-   $j = 1, 2, 3$ observations for each patient $i$, and
+
+-   $\eta_{ij} = \log \biggl( \frac{\mathbb{P}(Arthrit_{ij}=1)}{1 - \mathbb{P}(Arthrit_{ij}=1)} \biggr)$,
+
+and:
+
+-   $b_{0i}$ is the log odds of reporting "good" arthritis at baseline for patient $i$,
+
+-   $b_{1i}$ is the change in patient $i$'s log odds of reporting "good" arthritis as of Month 1 compared to baseline, and
+
+-   $b_{2i}$ is the change in patient $i$'s log odds of reporting "good" arthritis as of Month 3 compared to baseline.
+
+[Between-Subjects Model:]{.underline}
+
+$$
+\begin{aligned}
+b_{0i} &= \beta_0 + \upsilon_{0i} \\
+b_{1i} &= \beta_1 + \beta_3 \cdot TX_i \\
+b_{2i} &= \beta_2 + \beta_4 \cdot TX_i \\
+\upsilon_{0i} &\sim \mathrm{iid} \; \mathcal{N}(0, \sigma^2_{\upsilon})
+\end{aligned}
+$$
+
+where:
+
+-   $\beta_0$ is the log odds of reporting "good" arthritis at baseline, given $\upsilon_{0i} = 0$,
+
+-   $\upsilon_{0i}$ is the incremental log odds of reporting "good" arthritis at baseline for patient $i$,
+
+-   $\beta_1$ is the change in a given patient in the placebo group's log odds of reporting "good" arthritis as of Month 1 compared to baseline, for a given value of $\upsilon_{0i}$ corresponding to that patient,
+
+-   $\beta_3$ is the difference between a patient in the treatment group and a patient in the placebo groups' log odds of reporting "good" arthritis as of Month 1, assuming both have equal values of $\upsilon_{0i}$,
+
+-   $\beta_2$ is the change in a given patient in the placebo group's log odds of reporting "good" arthritis as of Month 3 compared to baseline, for a given value of $\upsilon_{0i}$ corresponding to that patient, and
+
+-   $\beta_4$ is the difference between a patient in the treatment group and a patient in the placebo groups' log odds of reporting "good" arthritis as of Month 3, assuming both have equal values of $\upsilon_{0i}$.
+
+```{r}
+stata(
+'infile id arthrit txaura time ///
+using arthritb.dat.txt, clear
+generate timea = time==1
+generate timeb = time==2
+generate tx_timea = txaura * timea
+generate tx_timeb = txaura * timeb
+
+melogit arthrit timea timeb tx_timea tx_timeb ///
+  || id:, covariance(unstructured)
+')
+```
+
+As summarized in the Stata output above, we find that:
+
+-   At baseline, a patient with $\upsilon_{0i} = 0$ has a log odds of reporting "good" arthritis of approximately $-2.135$.
+
+-   One month after baseline, a given patient (i.e., holding $\upsilon_{0i}$ fixed) in the placebo group's log odds of reporting "good" arthritis increase by approximately $1.168$ relative to baseline.
+
+-   One month after baseline, a patient in the treatment group's log odds of reporting "good" arthritis are approximately $0.084$ higher than that of a patient in the placebo group with the same value of $\upsilon_{0i}$. This estimate is not statistically significant, as discussed in greater detail below.
+
+-   Three months after baseline, a given patient (i.e., holding $\upsilon_{0i}$ fixed) in the placebo group's log odds of reporting "good" arthritis increase by approximately $0.633$ relative to baseline.
+
+-   Three months after baseline, a patient in the treatment group's log odds of reporting "good" arthritis are approximately $1.111$ higher than that of a patient in the placebo group with the same value of $\upsilon_{0i}$.
+
+In particular, we find that there is evidence of a treatment effect, but only at the three months after baseline mark. Indeed, our estimate of $\beta_3$ is not only small, at around $0.084$, but is also not statistically significant, with a $p$-value of approximately $0.829 > 0.05$. As such, there is [not]{.underline} statistical evidence of a significant difference in the log odds of reporting "good" arthritis between a patient with a given value of $\upsilon_{0i}$ prescribed auranofin and a patient with the same value of $\upsilon_{0i}$ prescribed the placebo one month after beginning treatment. Meanwhile, our estimate of $\beta_4$ is much larger, at around $1.111$, and is statistically significant, with a $p$-value of $0.005 < 0.01$. Thus, there [is]{.underline} statistical evidence of a significance difference in the log odds of reporting "good" arthritis between a patient with a given value of $\upsilon_{0i}$ prescribed auranofin and a patient with the same value of $\upsilon_{0i}$ prescribed the placebo three months after beginning treatment.
+
+As shown in the table and plot below, our mixed model's fitted/estimated probabilities of reporting "good" arthritis (`pmarg`) very closely match the actual proportions observed in the data (`pobs`).
+
+```{r}
+stata(
+'infile id arthrit txaura time ///
+using arthritb.dat.txt, clear
+generate timea = time==1
+generate timeb = time==2
+generate tx_timea = txaura * timea
+generate tx_timeb = txaura * timeb
+
+quietly melogit arthrit timea timeb tx_timea tx_timeb ///
+  || id:, covariance(unstructured)
+
+predict p_marg, marginal
+collapse (mean) pmarg=p_marg pobs=arthrit, by(txaura time)
+list time txaura pmarg pobs
+')
+```
+
+```{r}
+#| include: false
+
+### Equivalent computation of marginal probabilities using mata
+
+### probs not quite the same due to approximation ---
+### only good to around 2 decimal places
+
+stata(
+'mata
+
+/* (Constant, TimeA, TimeB, TX*TimeA, TX*TimeB) */
+
+X = (1, 0, 0, 0, 0 \\
+     1, 1, 0, 0, 0 \\
+     1, 0, 1, 0, 0 \\
+     1, 0, 0, 0, 0 \\
+     1, 1, 0, 1, 0 \\
+     1, 0, 1, 0, 1)
+     
+beta_mrm = (-2.13456 \\
+             1.167807 \\
+             0.6333286 \\
+             0.0836466 \\
+             1.111217)
+
+var_u = 5.12623
+
+beta_mrm_std = beta_mrm / sqrt(((16/15)^2) * (3/(pi()^2)) * var_u + 1)
+
+z = X * beta_mrm_std
+mprob = invlogit(z)
+mprob
+')
+```
+
+```{r}
+# scatterplot data for plotting
+obs = obs %>% mutate(pest_MRM = 1)
+obs$pest_MRM = obs$pest_MRM * c(.2288529, .2288529,
+                                .3647873, .3757912,
+                                .2985835, .4437701)
+plotdata2 = melt(obs, id.vars = c("TIME", "TXAURA", "trt2"))
+
+colors = c("Placebo (Estimated)" = "red",
+           "Treatment (Estimated)" = "blue",
+           "Placebo (Observed)" = "brown",
+           "Treatment (Observed)" ="purple")
+
+ggplot(plotdata2, aes(x = TIME, y = value, col = )) +
+  theme_bw() + 
+  geom_point(size = 3,
+             data = filter(plotdata2, TXAURA == 0, variable == "pobs"),
+             mapping = aes(color = "Placebo (Observed)")) +
+  geom_point(size = 3,
+             data = filter(plotdata2, TXAURA == 1, variable == "pobs"),
+             mapping = aes(color = "Treatment (Observed)")) +
+  geom_line(size = 1.2,
+             data = filter(plotdata2, TXAURA == 0, variable == "pest_MRM"),
+             mapping = aes(color = "Placebo (Estimated)")) +
+  geom_line(size = 1.2,
+             data = filter(plotdata2, TXAURA == 1, variable == "pest_MRM"),
+             mapping = aes(color = "Treatment (Estimated)")) +
+  scale_x_continuous(breaks = c(0:2),
+                     minor_breaks = NULL,
+                     n.breaks = 3,
+                     labels = c("Baseline", "Month 1", "Month 3")) +
+  # ylim(c(0, 1)) + 
+  xlab("Time of Measurement") +
+  ylab("Probability / Proportion") +
+  ggtitle('Estimated & Observed Probabilities of Reporting "Good" Arthritis') +
+  theme(plot.title = element_text(hjust = 0.5, size = 12)) +
+  theme(legend.position = "bottom") +
+  labs(col = NULL) +
+  scale_color_manual(values=colors) +
+  guides(color = guide_legend(nrow=2))
+```
+
+# Question 3
+
+**How do the estimates from (1) and (2) relate to each other?**
+
+The GEE coefficient estimates we found in Question (1) are the [marginal]{.underline} log odds effects associated with each regressor. That is, each GEE coefficient estimate is the [population average]{.underline} effect of a one-unit increase in the corresponding variable on the log odds of reporting "good" arthritis.
+
+Meanwhile, the MRM coefficient estimates we found in Question (2) are the [conditional]{.underline} log odds effects associated with each regressor for a given value of $\upsilon_{0i}$. That is, each MRM coefficient estimate is the effect of a one-unit increase in the corresponding variable on the log odds of reporting "good" arthritis [for a specific patient]{.underline} with a given value of $\upsilon_{0i}$.
+
+The two sets of coefficient estimates are (approximately) related as follows:
+
+$$
+\hat{\beta}_{GEE} \approx \hat{\beta}_{MRM} /
+\sqrt{\Bigl(\frac{16}{15}\Bigr)^2 *\frac{3}{\pi^2} * \sigma_{\upsilon_{0i}}^2 + 1}
+$$
+
+From our Stata output in Question (2), $\sigma^2_{\upsilon_{0i}} \approx 5.12623$. In the table below, we show the conditional coefficient estimates we calculated using the MRM in Question (2), use the formula above to approximate the marginal coefficients, and finally show that these approximations are close to the marginal coefficient estimates we calculated using the GEE in Question (1) (shown by comparing the values in the final two columns).
+
+```{r}
+stata(
+'mata
+
+/* (Constant, TimeA, TimeB, TX*TimeA, TX*TimeB) */
+
+X = (1, 0, 0, 0, 0 \\
+     1, 1, 0, 0, 0 \\
+     1, 0, 1, 0, 0 \\
+     1, 0, 0, 0, 0 \\
+     1, 1, 0, 1, 0 \\
+     1, 0, 1, 0, 1)
+     
+beta_mrm = (-2.13456 \\
+             1.167807 \\
+             0.6333286 \\
+             0.0836466 \\
+             1.111217)
+
+var_u = 5.12623
+
+beta_mrm_std = beta_mrm / sqrt(((16/15)^2) * (3/(pi()^2)) * var_u + 1)
+beta_mrm_std
+
+end
+')
+```
+
++-------------------+---------------------+--------------------------------------------------------------------------------------------------------------------------------+---------------------+
+| Coefficient       | $\hat{\beta}_{MRM}$ | $\tilde{\beta}_{GEE} = \hat{\beta}_{MRM} / \sqrt{\Bigl(\frac{16}{15}\Bigr)^2 *\frac{3}{\pi^2} * \sigma_{\upsilon_{0i}}^2 + 1}$ | $\hat{\beta}_{GEE}$ |
+|                   |                     |                                                                                                                                |                     |
+|                   | (Q2)                |                                                                                                                                | (Q1)                |
++:=================:+:===================:+:==============================================================================================================================:+:===================:+
+| Constant          | $-2.135$            | $-1.282$                                                                                                                       | $-1.220$            |
++-------------------+---------------------+--------------------------------------------------------------------------------------------------------------------------------+---------------------+
+| $TimeA$           | $1.168$             | $0.701$                                                                                                                        | $0.684$             |
++-------------------+---------------------+--------------------------------------------------------------------------------------------------------------------------------+---------------------+
+| $TimeB$           | $0.633$             | $0.380$                                                                                                                        | $0.375$             |
++-------------------+---------------------+--------------------------------------------------------------------------------------------------------------------------------+---------------------+
+| $TX \times TimeA$ | $0.084$             | $0.050$                                                                                                                        | $0.043$             |
++-------------------+---------------------+--------------------------------------------------------------------------------------------------------------------------------+---------------------+
+| $TX \times TimeB$ | $1.111$             | $0.667$                                                                                                                        | $0.635$             |
++-------------------+---------------------+--------------------------------------------------------------------------------------------------------------------------------+---------------------+
+
+This relationship also explains why we were able to estimate nearly identical marginal probabilities for each Time-TX pair in Questions (1) and (2).
+
+# Question 4
+
+**What do you conclude about the efficacy of auranofin in the treatment of arthritis? Descriptive statistics, like marginal proportions or odds ratios, may help elucidate your results. Write up your final conclusions in a way that a medical doctor could understand.**
+
+Based on our analyses of the data using both random intercept and GEE models, we can conclude that auranofin is an effective treatment for arthritis (at least as measured by patients' self-reported presence or absence of pain), but requires a period of between one and three months for the effect to set in. At the outset of the clinical trial, the participants had an average probability of reporting "good" (i.e., minimally painful) arthritis of only around $0.23$. One month into the study, participants in the auranofin-treated group had an average probability of reporting "good" arthritis of around $0.37$–$0.38$, but participants in the placebo group had an average probability of reporting "good" arthritis of around $0.36$–$0.38$. So, at the one-month mark, auranofin did not significantly improve patients' self-reported arthritis levels relative to the placebo. However, three months into the study, participants in the auranofin-treated group had an average probability of reporting "good" arthritis of around $0.44$–$0.45$, while participants in the placebo group had an average probability of reporting "good" arthritis of only around $0.30$. That is, even though patients in the treated and placebo groups did not have different self-reported arthritis outcomes on average after one month of treatment, by three months of treatment, patients treated with auranofin reported "good" arthritis with a significantly higher probability than their counterparts in the placebo group.
+
+It is also worth noting that patients treated with auranofin didn't just improve relative to the placebo group on average, but also improved relative to their own starting points on average. Indeed, since $0.44 \div 0.23 \approx 1.9 \approx 2$, the probability of a patient treated with auranofin reporting "good" arthritis nearly doubled (on average) from the beginning of the study to the three-month mark!
